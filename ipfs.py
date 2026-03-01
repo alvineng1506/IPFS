@@ -1,40 +1,23 @@
-import requests
+import os
 import json
+import requests
+
+PINATA_PIN_JSON_URL = "https://api.pinata.cloud/pinning/pinJSONToIPFS"
 
 def pin_to_ipfs(data):
     assert isinstance(data, dict), "Error pin_to_ipfs expects a dictionary"
 
-    # Convert dict -> JSON bytes
-    payload = json.dumps(data).encode("utf-8")
+    jwt = os.getenv("PINATA_JWT") or os.getenv("PINATA_JWT")
+    if not jwt:
+        raise RuntimeError("PINATA_JWT environment variable not set")
 
-    # Try common public IPFS API endpoints
-    api_endpoints = [
-        "https://ipfs.infura.io:5001/api/v0/add",
-        "https://dweb.link/api/v0/add",
-        "http://127.0.0.1:5001/api/v0/add",
-    ]
+    headers = {"Authorization": f"Bearer {jwt}"}
 
-    files = {"file": ("data.json", payload, "application/json")}
-    params = {"pin": "true"}
+    r = requests.post(PINATA_PIN_JSON_URL, headers=headers, json=data, timeout=30)
+    r.raise_for_status()
 
-    last_err = None
-    for url in api_endpoints:
-        try:
-            r = requests.post(url, files=files, params=params, timeout=30)
-            r.raise_for_status()
-
-            cid = None
-            for line in r.text.splitlines():
-                if line.strip():
-                    cid = json.loads(line).get("Hash")
-            if not cid:
-                raise ValueError("IPFS add response missing Hash/CID")
-
-            return cid
-        except Exception as e:
-            last_err = e
-
-    raise RuntimeError("pin_to_ipfs failed: no working IPFS API endpoint available") from last_err
+    cid = r.json()["IpfsHash"]
+    return cid
 
 
 def get_from_ipfs(cid, content_type="json"):
@@ -52,7 +35,7 @@ def get_from_ipfs(cid, content_type="json"):
         try:
             r = requests.get(url, timeout=30)
             r.raise_for_status()
-            data = json.loads(r.text)  # assume valid JSON per assignment
+            data = json.loads(r.text)
             assert isinstance(data, dict), f"get_from_ipfs should return a dict"
             return data
         except Exception as e:
